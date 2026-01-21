@@ -1,0 +1,148 @@
+name: Competition Results Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      competition_name:
+        description: 'Competition name (e.g., "Grand Prix Rome 2026")'
+        required: true
+        type: string
+      competition_url:
+        description: 'World Taekwondo competition URL (optional)'
+        required: false
+        type: string
+      sync_rankings:
+        description: 'Also sync rankings after competition results'
+        required: false
+        default: 'true'
+        type: boolean
+
+jobs:
+  sync-competition:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install azure-storage-blob azure-identity duckdb pyarrow selenium webdriver-manager
+
+      - name: Set up Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: Scrape competition results
+        env:
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+          COMPETITION_NAME: ${{ inputs.competition_name }}
+          COMPETITION_URL: ${{ inputs.competition_url }}
+        run: |
+          python -c "
+          import os
+          import sys
+          from pathlib import Path
+
+          competition_name = os.getenv('COMPETITION_NAME', '')
+          competition_url = os.getenv('COMPETITION_URL', '')
+
+          print(f'Syncing competition: {competition_name}')
+
+          # Try to use the detailed scraper
+          try:
+              from scrape_wt_detailed import scrape_competition_results
+              if competition_url:
+                  scrape_competition_results(competition_url)
+              else:
+                  print('No URL provided, scraping latest results...')
+                  from scraper_agent_complete import AutonomousScraper
+                  scraper = AutonomousScraper()
+                  scraper.scrape_category('grand_prix', max_pages=5)
+          except ImportError as e:
+              print(f'Scraper not available: {e}')
+              print('Using fallback method...')
+              # Fallback: run incremental scraper
+              from scraper_agent_incremental import IncrementalScraper
+              scraper = IncrementalScraper()
+              scraper.run_incremental_update()
+
+          print('Competition sync complete')
+          "
+
+      - name: Upload competition data to Azure
+        env:
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+        run: |
+          python -c "
+          import os
+          from pathlib import Path
+
+          # Check if blob_storage is available
+          try:
+              from blob_storage import upload_parquet, save_matches, _use_azure
+              import pandas as pd
+
+              if not _use_azure():
+                  print('Azure not configured, skipping upload')
+                  exit(0)
+
+              # Find and upload new match data
+              for data_dir in ['data_wt_detailed', 'data_incremental', 'data_all_categories']:
+                  path = Path(data_dir)
+                  if path.exists():
+                      for csv_file in path.glob('**/*results*.csv'):
+                          try:
+                              df = pd.read_csv(csv_file)
+                              if not df.empty:
+                                  print(f'Found: {csv_file} ({len(df)} rows)')
+                                  save_matches(df, append=True)
+                          except Exception as e:
+                              print(f'Error with {csv_file}: {e}')
+
+          except ImportError:
+              print('blob_storage module not available')
+          "
+
+      - name: Trigger rankings sync
+        if: inputs.sync_rankings == 'true'
+        env:
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+        run: python sync_rankings.py
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: competition-results-${{ github.run_id }}
+          path: |
+            data_wt_detailed/*.csv
+            data_wt_detailed/*.json
+            data_incremental/**/*.csv
+            ranking_changes.json
+            alert_message.txt
+          retention-days: 30
+
+      - name: Summary
+        run: |
+          echo "## Competition Results Sync" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Competition:** ${{ inputs.competition_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Rankings Updated:** ${{ inputs.sync_rankings }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+
+  # Trigger alerts if rankings changed
+  trigger-alerts:
+    needs: sync-competition
+    if: inputs.sync_rankings == 'true'
+    uses: ./.github/workflows/send-alerts.yml
+    secrets: inherit

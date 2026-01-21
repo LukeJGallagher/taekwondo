@@ -1,0 +1,143 @@
+name: Send Ranking Alerts
+
+on:
+  workflow_call:
+    secrets:
+      AZURE_STORAGE_CONNECTION_STRING:
+        required: false
+      SENDGRID_API_KEY:
+        required: false
+      SLACK_WEBHOOK_URL:
+        required: false
+      ALERT_EMAILS:
+        required: false
+
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Send test alert'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  send-alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install alert dependencies
+        run: |
+          pip install sendgrid slack-sdk requests
+
+      - name: Download sync artifacts
+        if: github.event_name == 'workflow_call'
+        uses: actions/download-artifact@v4
+        with:
+          name: sync-results-${{ github.run_id }}
+          path: ./
+
+      - name: Send Email Alert
+        if: env.SENDGRID_API_KEY != ''
+        env:
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          ALERT_EMAILS: ${{ secrets.ALERT_EMAILS }}
+        run: |
+          python -c "
+          import os
+          import json
+          from sendgrid import SendGridAPIClient
+          from sendgrid.helpers.mail import Mail, Email, To, Content
+
+          # Read alert message
+          alert_msg = ''
+          if os.path.exists('alert_message.txt'):
+              with open('alert_message.txt', 'r') as f:
+                  alert_msg = f.read()
+
+          if not alert_msg:
+              print('No alert message to send')
+              exit(0)
+
+          # Get recipients
+          recipients = os.getenv('ALERT_EMAILS', '').split(',')
+          recipients = [r.strip() for r in recipients if r.strip()]
+
+          if not recipients:
+              print('No email recipients configured')
+              exit(0)
+
+          # Send email
+          sg = SendGridAPIClient(os.getenv('SENDGRID_API_KEY'))
+
+          for recipient in recipients:
+              message = Mail(
+                  from_email=Email('noreply@teamsaudi.com', 'Saudi Taekwondo Analytics'),
+                  to_emails=To(recipient),
+                  subject='🥋 Taekwondo Ranking Alert - KSA',
+                  plain_text_content=Content('text/plain', alert_msg)
+              )
+
+              try:
+                  response = sg.send(message)
+                  print(f'Email sent to {recipient}: {response.status_code}')
+              except Exception as e:
+                  print(f'Failed to send to {recipient}: {e}')
+          "
+
+      - name: Send Slack Alert
+        if: env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          python -c "
+          import os
+          import json
+          import requests
+
+          # Read alert message
+          alert_msg = ''
+          if os.path.exists('alert_message.txt'):
+              with open('alert_message.txt', 'r') as f:
+                  alert_msg = f.read()
+
+          if not alert_msg:
+              print('No alert message to send')
+              exit(0)
+
+          webhook_url = os.getenv('SLACK_WEBHOOK_URL')
+          if not webhook_url:
+              print('No Slack webhook configured')
+              exit(0)
+
+          # Format for Slack
+          payload = {
+              'text': alert_msg,
+              'username': 'Taekwondo Analytics Bot',
+              'icon_emoji': ':martial_arts_uniform:'
+          }
+
+          response = requests.post(webhook_url, json=payload)
+          print(f'Slack notification: {response.status_code}')
+          "
+
+      - name: Log Alert (fallback)
+        if: env.SENDGRID_API_KEY == '' && env.SLACK_WEBHOOK_URL == ''
+        run: |
+          echo "## Alert Message (no notification channels configured)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f "alert_message.txt" ]; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat alert_message.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No alert message generated" >> $GITHUB_STEP_SUMMARY
+          fi
