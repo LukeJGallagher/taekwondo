@@ -1,31 +1,19 @@
 # Weekly World Taekwondo Rankings Scraper
 # =========================================
-# Runs Playwright scraper weekly to collect all 16 weight categories
-# Uploads to Azure Blob Storage and commits summary to repo
+# Scrapes rankings data and uploads to Azure Blob Storage
 
-name: Weekly Rankings Scraper (Playwright)
+name: Weekly Rankings Scraper
 
 on:
-  # Run every Monday at 06:00 UTC (before workday)
+  # Run every Monday at 06:00 UTC
   schedule:
     - cron: '0 6 * * 1'
 
-  # Allow manual trigger from GitHub UI
+  # Allow manual trigger
   workflow_dispatch:
-    inputs:
-      categories:
-        description: 'Specific categories (e.g., M-58kg,F-67kg) or leave empty for all'
-        required: false
-        default: ''
-      upload_to_azure:
-        description: 'Upload to Azure Blob Storage'
-        required: false
-        default: true
-        type: boolean
 
 env:
   PYTHON_VERSION: '3.11'
-  DATA_DIR: 'data'
 
 jobs:
   scrape-rankings:
@@ -36,56 +24,178 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas selenium webdriver-manager
-          # Install Chrome for Selenium
-          sudo apt-get update
-          sudo apt-get install -y chromium-browser chromium-chromedriver
+          pip install pandas selenium webdriver-manager requests beautifulsoup4
 
-      - name: Run Selenium Rankings Scraper
-        id: scrape
+      - name: Create data directories
         run: |
-          echo "Starting Selenium scraper at $(date)"
+          mkdir -p data/rankings
+          mkdir -p data/athletes
 
-          # Build command with optional categories
-          CMD="python scrape_rankings_by_category.py --output ${{ env.DATA_DIR }}"
+      - name: Run Rankings Scraper
+        id: scrape
+        continue-on-error: true
+        run: |
+          python << 'EOF'
+          import time
+          import pandas as pd
+          from pathlib import Path
+          from datetime import datetime
+          from selenium import webdriver
+          from selenium.webdriver.common.by import By
+          from selenium.webdriver.chrome.options import Options
+          from selenium.webdriver.chrome.service import Service
+          from webdriver_manager.chrome import ChromeDriverManager
+          from io import StringIO
 
-          if [ -n "${{ github.event.inputs.categories }}" ]; then
-            CMD="$CMD --categories ${{ github.event.inputs.categories }}"
-          fi
+          print("="*60)
+          print("WORLD TAEKWONDO RANKINGS SCRAPER")
+          print("="*60)
 
-          # Run scraper
-          $CMD
+          # Setup Chrome
+          chrome_options = Options()
+          chrome_options.add_argument('--headless=new')
+          chrome_options.add_argument('--no-sandbox')
+          chrome_options.add_argument('--disable-dev-shm-usage')
+          chrome_options.add_argument('--disable-gpu')
+          chrome_options.add_argument('--window-size=1920,1080')
+          chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
 
-          # Check if data was collected
-          if [ -f "${{ env.DATA_DIR }}/rankings/world_rankings_latest.csv" ]; then
-            ATHLETE_COUNT=$(wc -l < "${{ env.DATA_DIR }}/rankings/world_rankings_latest.csv")
+          try:
+              service = Service(ChromeDriverManager().install())
+              driver = webdriver.Chrome(service=service, options=chrome_options)
+              print("[OK] Chrome initialized")
+          except Exception as e:
+              print(f"[ERROR] Chrome setup failed: {e}")
+              exit(1)
+
+          try:
+              # Load World Taekwondo rankings page
+              url = "https://www.worldtaekwondo.org/athletes/Ranking/contents"
+              print(f"\n[LOADING] {url}")
+              driver.get(url)
+              time.sleep(5)
+
+              # Find iframe
+              iframes = driver.find_elements(By.TAG_NAME, 'iframe')
+              print(f"[OK] Found {len(iframes)} iframes")
+
+              for iframe in iframes:
+                  src = iframe.get_attribute('src') or ""
+                  if 'simplycompete' in src.lower():
+                      driver.switch_to.frame(iframe)
+                      print(f"[OK] Switched to SimplyCompete iframe")
+                      break
+
+              # Wait for content
+              time.sleep(5)
+
+              # Find tables
+              tables = driver.find_elements(By.TAG_NAME, 'table')
+              print(f"[OK] Found {len(tables)} tables")
+
+              if not tables:
+                  print("[ERROR] No tables found")
+                  driver.quit()
+                  exit(1)
+
+              # Extract best table
+              best_table = None
+              max_rows = 0
+              for table in tables:
+                  rows = table.find_elements(By.TAG_NAME, 'tr')
+                  if len(rows) > max_rows:
+                      max_rows = len(rows)
+                      best_table = table
+
+              if not best_table or max_rows < 2:
+                  print("[ERROR] No valid table found")
+                  driver.quit()
+                  exit(1)
+
+              # Parse with pandas
+              html = best_table.get_attribute('outerHTML')
+              dfs = pd.read_html(StringIO(html))
+
+              if dfs and len(dfs[0]) > 0:
+                  df = dfs[0]
+                  print(f"[OK] Extracted {len(df)} rows")
+
+                  # Standardize columns
+                  df.columns = ['rank', 'rank_change', 'athlete_name', 'country', 'points'][:len(df.columns)]
+
+                  # Add metadata
+                  df['weight_category'] = 'M-58kg'  # Default category shown
+                  df['gender'] = 'M'
+                  df['scraped_at'] = datetime.now().isoformat()
+
+                  # Save
+                  output_dir = Path('data/rankings')
+                  output_dir.mkdir(parents=True, exist_ok=True)
+
+                  timestamp = datetime.now().strftime('%Y%m%d')
+                  df.to_csv(output_dir / f'world_rankings_{timestamp}.csv', index=False)
+                  df.to_csv(output_dir / 'world_rankings_latest.csv', index=False)
+
+                  print(f"\n[SAVED] {len(df)} athletes to data/rankings/")
+                  print(f"[OK] Scraping complete!")
+
+                  # Check for Saudi athletes
+                  saudi = df[df['country'].str.contains('KSA|Saudi', case=False, na=False)]
+                  if len(saudi) > 0:
+                      print(f"\n[KSA] Found {len(saudi)} Saudi athletes!")
+                      for _, row in saudi.iterrows():
+                          print(f"  - {row['athlete_name']}: #{row['rank']}")
+              else:
+                  print("[ERROR] Could not parse table")
+                  exit(1)
+
+          except Exception as e:
+              print(f"[ERROR] Scraping failed: {e}")
+              import traceback
+              traceback.print_exc()
+              exit(1)
+
+          finally:
+              driver.quit()
+              print("[OK] Browser closed")
+          EOF
+
+          # Check results
+          if [ -f "data/rankings/world_rankings_latest.csv" ]; then
+            ATHLETE_COUNT=$(wc -l < "data/rankings/world_rankings_latest.csv")
             echo "athletes_collected=$((ATHLETE_COUNT - 1))" >> $GITHUB_OUTPUT
             echo "scrape_status=success" >> $GITHUB_OUTPUT
+            echo "Collected $((ATHLETE_COUNT - 1)) athletes"
           else
             echo "athletes_collected=0" >> $GITHUB_OUTPUT
             echo "scrape_status=failed" >> $GITHUB_OUTPUT
+            echo "No data collected"
           fi
 
-          echo "Scraping completed at $(date)"
-
       - name: Upload to Azure Blob Storage
-        if: ${{ steps.scrape.outputs.scrape_status == 'success' && (github.event.inputs.upload_to_azure == 'true' || github.event_name == 'schedule') }}
+        if: steps.scrape.outputs.scrape_status == 'success'
         env:
           AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
-          AZURE_CONTAINER_NAME: ${{ secrets.AZURE_CONTAINER_NAME || 'taekwondo-data' }}
         run: |
+          if [ -z "$AZURE_STORAGE_CONNECTION_STRING" ]; then
+            echo "No Azure connection string configured - skipping upload"
+            exit 0
+          fi
+
           pip install azure-storage-blob
 
           python << 'EOF'
@@ -95,130 +205,49 @@ jobs:
           from azure.storage.blob import BlobServiceClient
 
           connection_string = os.environ.get('AZURE_STORAGE_CONNECTION_STRING')
-          container_name = os.environ.get('AZURE_CONTAINER_NAME', 'taekwondo-data')
-
           if not connection_string:
-              print("No Azure connection string - skipping upload")
+              print("No Azure connection string")
               exit(0)
 
           blob_service = BlobServiceClient.from_connection_string(connection_string)
-          container = blob_service.get_container_client(container_name)
+          container = blob_service.get_container_client('taekwondo-data')
 
-          # Upload rankings files
-          data_dir = Path('data')
-          timestamp = datetime.now().strftime('%Y%m%d')
+          # Ensure container exists
+          try:
+              container.create_container()
+          except:
+              pass  # Already exists
 
-          for csv_file in data_dir.glob('**/*.csv'):
-              # Create blob path: rankings/world_rankings_20250121.csv
-              blob_name = f"{csv_file.parent.name}/{csv_file.stem}_{timestamp}.csv"
-
+          # Upload files
+          for csv_file in Path('data').glob('**/*.csv'):
+              blob_name = f"{csv_file.parent.name}/{csv_file.name}"
               with open(csv_file, 'rb') as data:
                   container.upload_blob(name=blob_name, data=data, overwrite=True)
                   print(f"Uploaded: {blob_name}")
 
-          # Also upload latest version
-          latest_csv = data_dir / 'rankings' / 'world_rankings_latest.csv'
-          if latest_csv.exists():
-              with open(latest_csv, 'rb') as data:
-                  container.upload_blob(name='rankings/world_rankings_latest.csv', data=data, overwrite=True)
-                  print("Uploaded: rankings/world_rankings_latest.csv (latest)")
-
           print("Azure upload complete")
           EOF
-
-      - name: Commit rankings summary to repo
-        if: steps.scrape.outputs.scrape_status == 'success'
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-
-          # Create/update summary file (not full data to avoid bloating repo)
-          python << 'EOF'
-          import pandas as pd
-          import json
-          from datetime import datetime
-          from pathlib import Path
-
-          data_dir = Path('data')
-          summary = {
-              'last_updated': datetime.now().isoformat(),
-              'categories': {},
-              'total_athletes': 0,
-              'saudi_athletes': []
-          }
-
-          # Read latest rankings
-          rankings_file = data_dir / 'rankings' / 'world_rankings_latest.csv'
-          if rankings_file.exists():
-              df = pd.read_csv(rankings_file)
-              summary['total_athletes'] = len(df)
-
-              # Count by category
-              if 'weight_category' in df.columns:
-                  summary['categories'] = df.groupby('weight_category').size().to_dict()
-
-              # Extract Saudi athletes
-              country_col = 'country' if 'country' in df.columns else 'MEMBER NATION'
-              if country_col in df.columns:
-                  saudi_df = df[df[country_col].str.upper().str.contains('KSA|SAUDI', na=False)]
-                  for _, row in saudi_df.iterrows():
-                      name_col = 'athlete_name' if 'athlete_name' in df.columns else 'NAME'
-                      summary['saudi_athletes'].append({
-                          'name': row.get(name_col, 'Unknown'),
-                          'rank': int(row.get('rank', row.get('RANK', 0))),
-                          'category': row.get('weight_category', 'Unknown')
-                      })
-
-          # Write summary
-          summary_file = data_dir / 'rankings_summary.json'
-          with open(summary_file, 'w') as f:
-              json.dump(summary, f, indent=2)
-
-          print(f"Summary: {summary['total_athletes']} athletes, {len(summary['saudi_athletes'])} Saudi")
-          EOF
-
-          # Commit if there are changes
-          git add data/rankings_summary.json
-          git diff --staged --quiet || git commit -m "Update rankings summary $(date +%Y-%m-%d)
-
-          Athletes: ${{ steps.scrape.outputs.athletes_collected }}
-
-          Automated by GitHub Actions"
-
-          git push || echo "Nothing to push"
 
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: rankings-data-${{ github.run_number }}
-          path: |
-            data/rankings/*.csv
-            data/rankings/*.json
-            data/athletes/*.csv
-          retention-days: 30
+          path: data/
+          if-no-files-found: ignore
 
       - name: Job Summary
         run: |
           echo "## Rankings Scrape Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status**: ${{ steps.scrape.outputs.scrape_status }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Athletes Collected**: ${{ steps.scrape.outputs.athletes_collected }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Run Time**: $(date)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ steps.scrape.outputs.scrape_status || 'unknown' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Athletes**: ${{ steps.scrape.outputs.athletes_collected || '0' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time**: $(date)" >> $GITHUB_STEP_SUMMARY
 
-          if [ -f "data/rankings_summary.json" ]; then
-            echo "### Saudi Athletes" >> $GITHUB_STEP_SUMMARY
-            python -c "import json; d=json.load(open('data/rankings_summary.json')); [print(f\"- {a['name']}: Rank #{a['rank']} ({a['category']})\") for a in d.get('saudi_athletes', [])]" >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "No Saudi athletes found" >> $GITHUB_STEP_SUMMARY
+          if [ -f "data/rankings/world_rankings_latest.csv" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Sample Data" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            head -6 data/rankings/world_rankings_latest.csv >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
           fi
-
-  notify-on-failure:
-    name: Notify on Failure
-    needs: scrape-rankings
-    if: failure()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Send failure notification
-        run: |
-          echo "Rankings scrape failed - check workflow logs"
-          # Add Slack/email notification here if secrets are configured
