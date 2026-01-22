@@ -298,6 +298,23 @@ jobs:
           print("Azure upload complete")
           EOF
 
+      - name: Commit data to repo
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          # Add scraped data files (CSV only)
+          git add data/rankings/*.csv data/athletes/*.csv || true
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Auto-update: Rankings data $(date +'%Y-%m-%d')"
+            git push
+            echo "Data committed and pushed to repo"
+          fi
+
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4

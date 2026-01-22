@@ -307,6 +307,23 @@ jobs:
               exit(1)
           EOF
 
+      - name: Commit data to repo
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          # Add scraped data files (CSV only, skip large parquet for repo size)
+          git add data/profiles/*.csv data/profiles/*.json || true
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Auto-update: Rankings data $(date +'%Y-%m-%d')"
+            git push
+            echo "Data committed and pushed to repo"
+          fi
+
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
