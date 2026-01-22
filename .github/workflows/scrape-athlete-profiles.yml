@@ -37,7 +37,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas selenium webdriver-manager requests beautifulsoup4
+          pip install pandas selenium webdriver-manager requests beautifulsoup4 pyarrow
 
       - name: Create data directories
         run: |
@@ -233,7 +233,7 @@ jobs:
                   for _, row in saudi_df.iterrows():
                       print(f"  - {row['athlete_name']} | {row['weight_category']} | Rank #{row['rank']}")
 
-              # Save files
+              # Save CSV files
               combined_df.to_csv(output_dir / f'all_rankings_{timestamp}.csv', index=False)
               combined_df.to_csv(output_dir / 'all_rankings_latest.csv', index=False)
 
@@ -245,6 +245,17 @@ jobs:
 
               if len(saudi_df) > 0:
                   saudi_df.to_csv(output_dir / 'saudi_athletes.csv', index=False)
+
+              # Save Parquet files (smaller, faster for Azure/DuckDB)
+              print("\n[PARQUET] Saving Parquet files...")
+              combined_df.to_parquet(output_dir / f'all_rankings_{timestamp}.parquet', compression='snappy')
+              combined_df.to_parquet(output_dir / 'all_rankings_latest.parquet', compression='snappy')
+              priority_athletes.to_parquet(output_dir / 'priority_athletes_latest.parquet', compression='snappy')
+              top20_df.to_parquet(output_dir / 'top20_global.parquet', compression='snappy')
+              asian_df.to_parquet(output_dir / 'asian_rivals.parquet', compression='snappy')
+              if len(saudi_df) > 0:
+                  saudi_df.to_parquet(output_dir / 'saudi_athletes.parquet', compression='snappy')
+              print("[OK] Parquet files saved")
 
               # Summary JSON
               summary = {
@@ -309,6 +320,12 @@ jobs:
 
           for f in Path('data/profiles').glob('*.csv'):
               blob_name = f'profiles/{f.name}'
+              with open(f, 'rb') as data:
+                  container.upload_blob(name=blob_name, data=data, overwrite=True)
+                  print(f"Uploaded: {blob_name}")
+
+          for f in Path('data/profiles').glob('*.parquet'):
+              blob_name = f'parquet/{f.name}'
               with open(f, 'rb') as data:
                   container.upload_blob(name=blob_name, data=data, overwrite=True)
                   print(f"Uploaded: {blob_name}")
