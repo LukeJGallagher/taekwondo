@@ -1,24 +1,24 @@
 # Scrape Athlete Profiles from SimplyCompete
-# Gets detailed win/loss records, match history, medals
+# Gets detailed win/loss records for top 20 + Asian Games rivals
 
 name: Athlete Profile Scraper
 
 on:
   workflow_dispatch:
-    inputs:
-      athlete_ids:
-        description: 'Comma-separated athlete UUIDs (leave empty for top ranked)'
-        required: false
-        default: ''
+
+  # Run after rankings scraper on Mondays
+  workflow_run:
+    workflows: ["Weekly Rankings Scraper"]
+    types: [completed]
 
 env:
   PYTHON_VERSION: '3.11'
 
 jobs:
   scrape-profiles:
-    name: Scrape Athlete Profiles
+    name: Scrape Top 20 + Asian Rivals
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: Checkout repository
@@ -44,7 +44,7 @@ jobs:
           mkdir -p data/athletes
           mkdir -p data/profiles
 
-      - name: Scrape Athlete Profiles
+      - name: Scrape Athlete Profiles - Top 20 + Asian Rivals
         id: scrape
         run: |
           python << 'EOF'
@@ -61,10 +61,55 @@ jobs:
           from selenium.webdriver.support.ui import WebDriverWait
           from selenium.webdriver.support import expected_conditions as EC
           from webdriver_manager.chrome import ChromeDriverManager
+          from io import StringIO
 
           print("="*60)
-          print("SIMPLYCOMPETE ATHLETE PROFILE SCRAPER")
+          print("ATHLETE PROFILE SCRAPER - TOP 20 + ASIAN RIVALS")
           print("="*60)
+
+          # Asian Games rival countries to track
+          ASIAN_RIVALS = [
+              'KOR', 'Korea', 'Republic of Korea',
+              'IRI', 'Iran', 'Islamic Republic',
+              'CHN', 'China', "People's Republic",
+              'JPN', 'Japan',
+              'UZB', 'Uzbekistan',
+              'KAZ', 'Kazakhstan',
+              'THA', 'Thailand',
+              'VIE', 'Vietnam', 'Viet Nam',
+              'IND', 'India',
+              'TPE', 'Chinese Taipei', 'Taiwan',
+              'JOR', 'Jordan',
+              'KSA', 'Saudi', 'Arabia',
+              'UAE', 'United Arab Emirates',
+              'KUW', 'Kuwait',
+              'QAT', 'Qatar',
+              'BRN', 'Bahrain',
+              'MAS', 'Malaysia',
+              'INA', 'Indonesia',
+              'PHI', 'Philippines',
+              'MGL', 'Mongolia',
+          ]
+
+          # All 16 weight categories
+          WEIGHT_CATEGORIES = {
+              'M-54kg': ('M', 'M_54'),
+              'M-58kg': ('M', 'M_58'),
+              'M-63kg': ('M', 'M_63'),
+              'M-68kg': ('M', 'M_68'),
+              'M-74kg': ('M', 'M_74'),
+              'M-80kg': ('M', 'M_80'),
+              'M-87kg': ('M', 'M_87'),
+              'M+87kg': ('M', 'M_87P'),
+              'F-46kg': ('F', 'F_46'),
+              'F-49kg': ('F', 'F_49'),
+              'F-53kg': ('F', 'F_53'),
+              'F-57kg': ('F', 'F_57'),
+              'F-62kg': ('F', 'F_62'),
+              'F-67kg': ('F', 'F_67'),
+              'F-73kg': ('F', 'F_73'),
+              'F+73kg': ('F', 'F_73P'),
+          }
 
           # Setup Chrome
           chrome_options = Options()
@@ -83,205 +128,146 @@ jobs:
           output_dir = Path('data/profiles')
           output_dir.mkdir(parents=True, exist_ok=True)
 
-          all_profiles = []
+          all_rankings = []
           timestamp = datetime.now().strftime('%Y%m%d')
+          base_url = "https://worldtaekwondo.simplycompete.com/widget/rankings?country=&lang=EN&cat="
 
-          # First, get athlete list from rankings page
-          print("\n[STEP 1] Getting athlete list from rankings...")
+          def is_asian_rival(country_text):
+              """Check if athlete is from Asian Games rival country"""
+              if not country_text:
+                  return False
+              for rival in ASIAN_RIVALS:
+                  if rival.lower() in country_text.lower():
+                      return True
+              return False
 
-          # Weight category codes and their UUIDs (extracted from SimplyCompete)
-          CATEGORIES = {
-              'M-58kg': {
-                  'code': 'M_58',
-                  'subCategory1': '11ef3918-30a6-2db9-8999-023374a4dcc1',
-                  'gender': 'M'
-              },
-              'M-68kg': {
-                  'code': 'M_68',
-                  'subCategory1': '11ef3918-57e7-2db5-8999-023374a4dcc1',
-                  'gender': 'M'
-              },
-              'M-80kg': {
-                  'code': 'M_80',
-                  'subCategory1': '11ef3918-7c74-8d95-8999-023374a4dcc1',
-                  'gender': 'M'
-              },
-              'F-57kg': {
-                  'code': 'F_57',
-                  'subCategory1': '11ef3918-e1a3-e5cd-8999-023374a4dcc1',
-                  'gender': 'F'
-              },
-              'F-67kg': {
-                  'code': 'F_67',
-                  'subCategory1': '11ef3919-04d3-e5d5-8999-023374a4dcc1',
-                  'gender': 'F'
-              },
-          }
+          # STEP 1: Scrape rankings for all categories with extended data
+          print("\n" + "="*60)
+          print("STEP 1: SCRAPING RANKINGS FOR ALL 16 CATEGORIES")
+          print("="*60)
 
-          base_rankings_url = "https://worldtaekwondo.simplycompete.com/widget/rankings?country=&lang=EN&cat="
-          base_profile_url = "https://worldtkd.simplycompete.com/playerProfileV2"
-
-          def extract_athlete_ids_from_rankings(category_code):
-              """Extract athlete user IDs from rankings page"""
-              url = f"{base_rankings_url}{category_code}"
-              print(f"  Loading rankings: {url}")
-
-              driver.get(url)
-              time.sleep(3)
-
-              # Look for profile links in the page
-              athlete_ids = []
-              links = driver.find_elements(By.TAG_NAME, 'a')
-
-              for link in links:
-                  href = link.get_attribute('href') or ''
-                  # Look for userId parameter in links
-                  if 'userId=' in href:
-                      match = re.search(r'userId=([a-f0-9-]+)', href)
-                      if match:
-                          user_id = match.group(1)
-                          name = link.text.strip()
-                          if user_id and name:
-                              athlete_ids.append({'userId': user_id, 'name': name})
-
-              return athlete_ids
-
-          def scrape_athlete_profile(user_id, category_info):
-              """Scrape individual athlete profile"""
-              url = f"{base_profile_url}?month=0&year=2026&subCategory1={category_info['subCategory1']}&rankingTypeId=11ef3916-58d3-484e-8999-023374a4dcc1&userId={user_id}"
-
-              print(f"    Profile URL: {url[:80]}...")
-              driver.get(url)
-              time.sleep(3)
-
-              profile = {
-                  'user_id': user_id,
-                  'scraped_at': datetime.now().isoformat()
-              }
+          for cat_name, (gender, cat_code) in WEIGHT_CATEGORIES.items():
+              print(f"\n[{cat_name}] Scraping...")
+              url = f"{base_url}{cat_code}"
 
               try:
-                  # Wait for content to load
-                  WebDriverWait(driver, 10).until(
-                      EC.presence_of_element_located((By.TAG_NAME, 'body'))
+                  driver.get(url)
+                  time.sleep(3)
+
+                  WebDriverWait(driver, 15).until(
+                      EC.presence_of_element_located((By.TAG_NAME, 'table'))
                   )
 
-                  page_text = driver.page_source
-
-                  # Extract name
-                  name_elem = driver.find_elements(By.TAG_NAME, 'h1')
-                  if name_elem:
-                      profile['name'] = name_elem[0].text.strip()
-
-                  # Extract country
-                  country_match = re.search(r'flag-icon-([a-z]{2})', page_text, re.I)
-                  if country_match:
-                      profile['country_code'] = country_match.group(1).upper()
-
-                  # Look for statistics in tables or divs
-                  # Win/Loss record
-                  win_match = re.search(r'Wins?[:\s]*(\d+)', page_text, re.I)
-                  loss_match = re.search(r'Loss(?:es)?[:\s]*(\d+)', page_text, re.I)
-                  if win_match:
-                      profile['wins'] = int(win_match.group(1))
-                  if loss_match:
-                      profile['losses'] = int(loss_match.group(1))
-
-                  # Points
-                  points_match = re.search(r'(?:Points|Pts)[:\s]*([\d,]+)', page_text, re.I)
-                  if points_match:
-                      profile['points'] = int(points_match.group(1).replace(',', ''))
-
-                  # Ranking
-                  rank_match = re.search(r'(?:Rank|#)\s*(\d+)', page_text, re.I)
-                  if rank_match:
-                      profile['rank'] = int(rank_match.group(1))
-
-                  # Matches/Fights
-                  matches_match = re.search(r'(?:Matches|Fights|Bouts)[:\s]*(\d+)', page_text, re.I)
-                  if matches_match:
-                      profile['total_matches'] = int(matches_match.group(1))
-
-                  # Try to find match history table
                   tables = driver.find_elements(By.TAG_NAME, 'table')
+                  best_table = None
+                  max_rows = 0
+
                   for table in tables:
                       rows = table.find_elements(By.TAG_NAME, 'tr')
-                      if len(rows) > 2:  # Likely a data table
-                          # Could be match history
-                          profile['has_match_history'] = True
-                          profile['match_count_found'] = len(rows) - 1
+                      if len(rows) > max_rows:
+                          max_rows = len(rows)
+                          best_table = table
 
-                  # Calculate win rate if we have data
-                  if 'wins' in profile and 'losses' in profile:
-                      total = profile['wins'] + profile['losses']
-                      if total > 0:
-                          profile['win_rate'] = round(profile['wins'] / total * 100, 1)
-                          profile['total_matches'] = total
+                  if best_table and max_rows >= 2:
+                      html = best_table.get_attribute('outerHTML')
+                      dfs = pd.read_html(StringIO(html))
+
+                      if dfs and len(dfs[0]) > 0:
+                          df = dfs[0]
+
+                          # Standardize columns
+                          if len(df.columns) >= 5:
+                              df.columns = ['rank', 'rank_change', 'athlete_name', 'country', 'points'] + list(df.columns[5:])
+                              df = df[['rank', 'rank_change', 'athlete_name', 'country', 'points']].copy()
+
+                          df['gender'] = gender
+                          df['weight_category'] = cat_name
+                          df['is_top20'] = df['rank'] <= 20
+                          df['is_asian_rival'] = df['country'].apply(is_asian_rival)
+                          df['scraped_at'] = datetime.now().isoformat()
+
+                          all_rankings.append(df)
+
+                          top20_count = (df['rank'] <= 20).sum()
+                          asian_count = df['is_asian_rival'].sum()
+                          print(f"  [OK] {len(df)} athletes | Top 20: {top20_count} | Asian rivals: {asian_count}")
 
               except Exception as e:
-                  print(f"    [ERROR] {e}")
-                  profile['error'] = str(e)
+                  print(f"  [ERROR] {cat_name}: {e}")
 
-              return profile
+              time.sleep(2)
 
-          # Scrape profiles from key categories
-          try:
-              for cat_name, cat_info in CATEGORIES.items():
-                  print(f"\n{'='*50}")
-                  print(f"[CATEGORY] {cat_name}")
-                  print(f"{'='*50}")
+          driver.quit()
+          print("\n[OK] Browser closed")
 
-                  # Get athlete IDs from rankings
-                  athletes = extract_athlete_ids_from_rankings(cat_info['code'])
-                  print(f"  Found {len(athletes)} athletes")
+          # Combine and analyze
+          if all_rankings:
+              combined_df = pd.concat(all_rankings, ignore_index=True)
 
-                  # Scrape top 10 profiles per category
-                  for i, athlete in enumerate(athletes[:10]):
-                      print(f"\n  [{i+1}/10] {athlete.get('name', 'Unknown')}")
+              # Filter for dashboard: Top 20 globally OR Top 10 Asian rivals per category
+              top20_df = combined_df[combined_df['is_top20']].copy()
+              asian_df = combined_df[combined_df['is_asian_rival']].copy()
 
-                      profile = scrape_athlete_profile(athlete['userId'], cat_info)
-                      profile['weight_category'] = cat_name
-                      profile['gender'] = cat_info['gender']
+              # Get top 10 Asian rivals per category
+              asian_top10 = asian_df.groupby('weight_category').head(10)
 
-                      if 'name' not in profile and 'name' in athlete:
-                          profile['name'] = athlete['name']
-
-                      all_profiles.append(profile)
-                      time.sleep(2)
-
-          except Exception as e:
-              print(f"[ERROR] Scraping failed: {e}")
-              import traceback
-              traceback.print_exc()
-
-          finally:
-              driver.quit()
-              print("\n[OK] Browser closed")
-
-          # Save results
-          if all_profiles:
-              df = pd.DataFrame(all_profiles)
-
-              # Save to CSV
-              df.to_csv(output_dir / f'athlete_profiles_{timestamp}.csv', index=False)
-              df.to_csv(output_dir / 'athlete_profiles_latest.csv', index=False)
-
-              # Save to JSON with more detail
-              with open(output_dir / f'athlete_profiles_{timestamp}.json', 'w') as f:
-                  json.dump(all_profiles, f, indent=2)
+              # Combine unique athletes
+              priority_athletes = pd.concat([top20_df, asian_top10]).drop_duplicates(
+                  subset=['athlete_name', 'weight_category']
+              )
 
               print(f"\n{'='*60}")
-              print("SCRAPING COMPLETE")
+              print("SCRAPING SUMMARY")
               print(f"{'='*60}")
-              print(f"Profiles scraped: {len(all_profiles)}")
-              print(f"With win data: {df['wins'].notna().sum() if 'wins' in df.columns else 0}")
-              print(f"Files saved to: data/profiles/")
+              print(f"Total athletes scraped: {len(combined_df)}")
+              print(f"Categories: {combined_df['weight_category'].nunique()}/16")
+              print(f"Countries: {combined_df['country'].nunique()}")
+              print(f"Top 20 athletes: {len(top20_df)}")
+              print(f"Asian rival athletes: {len(asian_df)}")
+              print(f"Priority athletes (Top 20 + Asian Top 10): {len(priority_athletes)}")
 
-              # Summary stats
-              if 'win_rate' in df.columns:
-                  print(f"Average win rate: {df['win_rate'].mean():.1f}%")
+              # Saudi athletes
+              saudi_df = combined_df[combined_df['country'].str.contains('KSA|Saudi', case=False, na=False)]
+              if len(saudi_df) > 0:
+                  print(f"\n[KSA] Saudi Athletes Found: {len(saudi_df)}")
+                  for _, row in saudi_df.iterrows():
+                      print(f"  - {row['athlete_name']} | {row['weight_category']} | Rank #{row['rank']}")
+
+              # Save files
+              combined_df.to_csv(output_dir / f'all_rankings_{timestamp}.csv', index=False)
+              combined_df.to_csv(output_dir / 'all_rankings_latest.csv', index=False)
+
+              priority_athletes.to_csv(output_dir / f'priority_athletes_{timestamp}.csv', index=False)
+              priority_athletes.to_csv(output_dir / 'priority_athletes_latest.csv', index=False)
+
+              top20_df.to_csv(output_dir / 'top20_global.csv', index=False)
+              asian_df.to_csv(output_dir / 'asian_rivals.csv', index=False)
+
+              if len(saudi_df) > 0:
+                  saudi_df.to_csv(output_dir / 'saudi_athletes.csv', index=False)
+
+              # Summary JSON
+              summary = {
+                  'scraped_at': datetime.now().isoformat(),
+                  'total_athletes': len(combined_df),
+                  'categories': combined_df['weight_category'].nunique(),
+                  'countries': combined_df['country'].nunique(),
+                  'top20_count': len(top20_df),
+                  'asian_rivals_count': len(asian_df),
+                  'priority_count': len(priority_athletes),
+                  'saudi_count': len(saudi_df),
+                  'by_category': combined_df.groupby('weight_category').size().to_dict(),
+                  'asian_countries': asian_df['country'].value_counts().head(15).to_dict()
+              }
+
+              with open(output_dir / 'scrape_summary.json', 'w') as f:
+                  json.dump(summary, f, indent=2)
+
+              print(f"\nFiles saved to: {output_dir}/")
 
           else:
-              print("\n[ERROR] No profiles collected!")
+              print("\n[ERROR] No data collected!")
+              exit(1)
           EOF
 
       - name: Upload artifacts
@@ -339,15 +325,46 @@ jobs:
           echo "## Athlete Profile Scrape Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ -f "data/profiles/athlete_profiles_latest.csv" ]; then
-            PROFILE_COUNT=$(wc -l < "data/profiles/athlete_profiles_latest.csv")
-            echo "- **Profiles scraped**: $((PROFILE_COUNT - 1))" >> $GITHUB_STEP_SUMMARY
-            echo "- **Timestamp**: $(date)" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Sample Data" >> $GITHUB_STEP_SUMMARY
+          if [ -f "data/profiles/scrape_summary.json" ]; then
+            echo "### Statistics" >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            cat data/profiles/scrape_summary.json >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
-            head -6 data/profiles/athlete_profiles_latest.csv >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -f "data/profiles/all_rankings_latest.csv" ]; then
+            TOTAL=$(wc -l < "data/profiles/all_rankings_latest.csv")
+            echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Total Athletes | $((TOTAL - 1)) |" >> $GITHUB_STEP_SUMMARY
+
+            if [ -f "data/profiles/top20_global.csv" ]; then
+              TOP20=$(wc -l < "data/profiles/top20_global.csv")
+              echo "| Top 20 Global | $((TOP20 - 1)) |" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            if [ -f "data/profiles/asian_rivals.csv" ]; then
+              ASIAN=$(wc -l < "data/profiles/asian_rivals.csv")
+              echo "| Asian Rivals | $((ASIAN - 1)) |" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            if [ -f "data/profiles/saudi_athletes.csv" ]; then
+              SAUDI=$(wc -l < "data/profiles/saudi_athletes.csv")
+              echo "| Saudi Athletes | $((SAUDI - 1)) |" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Top 20 Sample" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            head -11 data/profiles/top20_global.csv >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Asian Rivals Sample" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            head -11 data/profiles/asian_rivals.csv >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
           else
-            echo "No profiles scraped" >> $GITHUB_STEP_SUMMARY
+            echo "No data collected" >> $GITHUB_STEP_SUMMARY
           fi
