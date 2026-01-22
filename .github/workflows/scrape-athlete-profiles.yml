@@ -180,6 +180,32 @@ jobs:
                               df.columns = ['rank', 'rank_change', 'athlete_name', 'country', 'points'] + list(df.columns[5:])
                               df = df[['rank', 'rank_change', 'athlete_name', 'country', 'points']].copy()
 
+                          # Extract profile URLs from table rows
+                          profile_urls = []
+                          rows = best_table.find_elements(By.TAG_NAME, 'tr')
+                          for row in rows[1:]:  # Skip header row
+                              try:
+                                  links = row.find_elements(By.TAG_NAME, 'a')
+                                  profile_url = ""
+                                  for link in links:
+                                      href = link.get_attribute('href') or ""
+                                      if 'playerProfile' in href or 'userId' in href:
+                                          profile_url = href
+                                          break
+                                  profile_urls.append(profile_url)
+                              except:
+                                  profile_urls.append("")
+
+                          # Pad to match DataFrame length
+                          while len(profile_urls) < len(df):
+                              profile_urls.append("")
+                          df['profile_url'] = profile_urls[:len(df)]
+
+                          # Extract athlete ID from profile URL
+                          df['athlete_id'] = df['profile_url'].apply(
+                              lambda x: re.search(r'userId=([a-f0-9-]+)', str(x)).group(1) if re.search(r'userId=([a-f0-9-]+)', str(x)) else ""
+                          )
+
                           df['gender'] = gender
                           df['weight_category'] = cat_name
                           df['is_top20'] = df['rank'] <= 20
