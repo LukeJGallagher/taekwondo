@@ -1,0 +1,353 @@
+# Scrape Athlete Profiles from SimplyCompete
+# Gets detailed win/loss records, match history, medals
+
+name: Athlete Profile Scraper
+
+on:
+  workflow_dispatch:
+    inputs:
+      athlete_ids:
+        description: 'Comma-separated athlete UUIDs (leave empty for top ranked)'
+        required: false
+        default: ''
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  scrape-profiles:
+    name: Scrape Athlete Profiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas selenium webdriver-manager requests beautifulsoup4
+
+      - name: Create data directories
+        run: |
+          mkdir -p data/athletes
+          mkdir -p data/profiles
+
+      - name: Scrape Athlete Profiles
+        id: scrape
+        run: |
+          python << 'EOF'
+          import time
+          import re
+          import json
+          import pandas as pd
+          from pathlib import Path
+          from datetime import datetime
+          from selenium import webdriver
+          from selenium.webdriver.common.by import By
+          from selenium.webdriver.chrome.options import Options
+          from selenium.webdriver.chrome.service import Service
+          from selenium.webdriver.support.ui import WebDriverWait
+          from selenium.webdriver.support import expected_conditions as EC
+          from webdriver_manager.chrome import ChromeDriverManager
+
+          print("="*60)
+          print("SIMPLYCOMPETE ATHLETE PROFILE SCRAPER")
+          print("="*60)
+
+          # Setup Chrome
+          chrome_options = Options()
+          chrome_options.add_argument('--headless=new')
+          chrome_options.add_argument('--no-sandbox')
+          chrome_options.add_argument('--disable-dev-shm-usage')
+          chrome_options.add_argument('--disable-gpu')
+          chrome_options.add_argument('--window-size=1920,1080')
+          chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+
+          service = Service(ChromeDriverManager().install())
+          driver = webdriver.Chrome(service=service, options=chrome_options)
+          driver.set_page_load_timeout(30)
+          print("[OK] Chrome initialized")
+
+          output_dir = Path('data/profiles')
+          output_dir.mkdir(parents=True, exist_ok=True)
+
+          all_profiles = []
+          timestamp = datetime.now().strftime('%Y%m%d')
+
+          # First, get athlete list from rankings page
+          print("\n[STEP 1] Getting athlete list from rankings...")
+
+          # Weight category codes and their UUIDs (extracted from SimplyCompete)
+          CATEGORIES = {
+              'M-58kg': {
+                  'code': 'M_58',
+                  'subCategory1': '11ef3918-30a6-2db9-8999-023374a4dcc1',
+                  'gender': 'M'
+              },
+              'M-68kg': {
+                  'code': 'M_68',
+                  'subCategory1': '11ef3918-57e7-2db5-8999-023374a4dcc1',
+                  'gender': 'M'
+              },
+              'M-80kg': {
+                  'code': 'M_80',
+                  'subCategory1': '11ef3918-7c74-8d95-8999-023374a4dcc1',
+                  'gender': 'M'
+              },
+              'F-57kg': {
+                  'code': 'F_57',
+                  'subCategory1': '11ef3918-e1a3-e5cd-8999-023374a4dcc1',
+                  'gender': 'F'
+              },
+              'F-67kg': {
+                  'code': 'F_67',
+                  'subCategory1': '11ef3919-04d3-e5d5-8999-023374a4dcc1',
+                  'gender': 'F'
+              },
+          }
+
+          base_rankings_url = "https://worldtaekwondo.simplycompete.com/widget/rankings?country=&lang=EN&cat="
+          base_profile_url = "https://worldtkd.simplycompete.com/playerProfileV2"
+
+          def extract_athlete_ids_from_rankings(category_code):
+              """Extract athlete user IDs from rankings page"""
+              url = f"{base_rankings_url}{category_code}"
+              print(f"  Loading rankings: {url}")
+
+              driver.get(url)
+              time.sleep(3)
+
+              # Look for profile links in the page
+              athlete_ids = []
+              links = driver.find_elements(By.TAG_NAME, 'a')
+
+              for link in links:
+                  href = link.get_attribute('href') or ''
+                  # Look for userId parameter in links
+                  if 'userId=' in href:
+                      match = re.search(r'userId=([a-f0-9-]+)', href)
+                      if match:
+                          user_id = match.group(1)
+                          name = link.text.strip()
+                          if user_id and name:
+                              athlete_ids.append({'userId': user_id, 'name': name})
+
+              return athlete_ids
+
+          def scrape_athlete_profile(user_id, category_info):
+              """Scrape individual athlete profile"""
+              url = f"{base_profile_url}?month=0&year=2026&subCategory1={category_info['subCategory1']}&rankingTypeId=11ef3916-58d3-484e-8999-023374a4dcc1&userId={user_id}"
+
+              print(f"    Profile URL: {url[:80]}...")
+              driver.get(url)
+              time.sleep(3)
+
+              profile = {
+                  'user_id': user_id,
+                  'scraped_at': datetime.now().isoformat()
+              }
+
+              try:
+                  # Wait for content to load
+                  WebDriverWait(driver, 10).until(
+                      EC.presence_of_element_located((By.TAG_NAME, 'body'))
+                  )
+
+                  page_text = driver.page_source
+
+                  # Extract name
+                  name_elem = driver.find_elements(By.TAG_NAME, 'h1')
+                  if name_elem:
+                      profile['name'] = name_elem[0].text.strip()
+
+                  # Extract country
+                  country_match = re.search(r'flag-icon-([a-z]{2})', page_text, re.I)
+                  if country_match:
+                      profile['country_code'] = country_match.group(1).upper()
+
+                  # Look for statistics in tables or divs
+                  # Win/Loss record
+                  win_match = re.search(r'Wins?[:\s]*(\d+)', page_text, re.I)
+                  loss_match = re.search(r'Loss(?:es)?[:\s]*(\d+)', page_text, re.I)
+                  if win_match:
+                      profile['wins'] = int(win_match.group(1))
+                  if loss_match:
+                      profile['losses'] = int(loss_match.group(1))
+
+                  # Points
+                  points_match = re.search(r'(?:Points|Pts)[:\s]*([\d,]+)', page_text, re.I)
+                  if points_match:
+                      profile['points'] = int(points_match.group(1).replace(',', ''))
+
+                  # Ranking
+                  rank_match = re.search(r'(?:Rank|#)\s*(\d+)', page_text, re.I)
+                  if rank_match:
+                      profile['rank'] = int(rank_match.group(1))
+
+                  # Matches/Fights
+                  matches_match = re.search(r'(?:Matches|Fights|Bouts)[:\s]*(\d+)', page_text, re.I)
+                  if matches_match:
+                      profile['total_matches'] = int(matches_match.group(1))
+
+                  # Try to find match history table
+                  tables = driver.find_elements(By.TAG_NAME, 'table')
+                  for table in tables:
+                      rows = table.find_elements(By.TAG_NAME, 'tr')
+                      if len(rows) > 2:  # Likely a data table
+                          # Could be match history
+                          profile['has_match_history'] = True
+                          profile['match_count_found'] = len(rows) - 1
+
+                  # Calculate win rate if we have data
+                  if 'wins' in profile and 'losses' in profile:
+                      total = profile['wins'] + profile['losses']
+                      if total > 0:
+                          profile['win_rate'] = round(profile['wins'] / total * 100, 1)
+                          profile['total_matches'] = total
+
+              except Exception as e:
+                  print(f"    [ERROR] {e}")
+                  profile['error'] = str(e)
+
+              return profile
+
+          # Scrape profiles from key categories
+          try:
+              for cat_name, cat_info in CATEGORIES.items():
+                  print(f"\n{'='*50}")
+                  print(f"[CATEGORY] {cat_name}")
+                  print(f"{'='*50}")
+
+                  # Get athlete IDs from rankings
+                  athletes = extract_athlete_ids_from_rankings(cat_info['code'])
+                  print(f"  Found {len(athletes)} athletes")
+
+                  # Scrape top 10 profiles per category
+                  for i, athlete in enumerate(athletes[:10]):
+                      print(f"\n  [{i+1}/10] {athlete.get('name', 'Unknown')}")
+
+                      profile = scrape_athlete_profile(athlete['userId'], cat_info)
+                      profile['weight_category'] = cat_name
+                      profile['gender'] = cat_info['gender']
+
+                      if 'name' not in profile and 'name' in athlete:
+                          profile['name'] = athlete['name']
+
+                      all_profiles.append(profile)
+                      time.sleep(2)
+
+          except Exception as e:
+              print(f"[ERROR] Scraping failed: {e}")
+              import traceback
+              traceback.print_exc()
+
+          finally:
+              driver.quit()
+              print("\n[OK] Browser closed")
+
+          # Save results
+          if all_profiles:
+              df = pd.DataFrame(all_profiles)
+
+              # Save to CSV
+              df.to_csv(output_dir / f'athlete_profiles_{timestamp}.csv', index=False)
+              df.to_csv(output_dir / 'athlete_profiles_latest.csv', index=False)
+
+              # Save to JSON with more detail
+              with open(output_dir / f'athlete_profiles_{timestamp}.json', 'w') as f:
+                  json.dump(all_profiles, f, indent=2)
+
+              print(f"\n{'='*60}")
+              print("SCRAPING COMPLETE")
+              print(f"{'='*60}")
+              print(f"Profiles scraped: {len(all_profiles)}")
+              print(f"With win data: {df['wins'].notna().sum() if 'wins' in df.columns else 0}")
+              print(f"Files saved to: data/profiles/")
+
+              # Summary stats
+              if 'win_rate' in df.columns:
+                  print(f"Average win rate: {df['win_rate'].mean():.1f}%")
+
+          else:
+              print("\n[ERROR] No profiles collected!")
+          EOF
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: athlete-profiles-${{ github.run_number }}
+          path: data/profiles/
+          if-no-files-found: ignore
+
+      - name: Upload to Azure
+        if: always()
+        env:
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+        run: |
+          if [ -z "$AZURE_STORAGE_CONNECTION_STRING" ]; then
+            echo "No Azure connection - skipping"
+            exit 0
+          fi
+
+          pip install azure-storage-blob
+
+          python << 'EOF'
+          import os
+          from pathlib import Path
+          from azure.storage.blob import BlobServiceClient
+
+          conn = os.environ.get('AZURE_STORAGE_CONNECTION_STRING')
+          if not conn:
+              exit(0)
+
+          blob_service = BlobServiceClient.from_connection_string(conn)
+          container = blob_service.get_container_client('taekwondo-data')
+
+          try:
+              container.create_container()
+          except:
+              pass
+
+          for f in Path('data/profiles').glob('*.csv'):
+              blob_name = f'profiles/{f.name}'
+              with open(f, 'rb') as data:
+                  container.upload_blob(name=blob_name, data=data, overwrite=True)
+                  print(f"Uploaded: {blob_name}")
+
+          for f in Path('data/profiles').glob('*.json'):
+              blob_name = f'profiles/{f.name}'
+              with open(f, 'rb') as data:
+                  container.upload_blob(name=blob_name, data=data, overwrite=True)
+                  print(f"Uploaded: {blob_name}")
+          EOF
+
+      - name: Job Summary
+        run: |
+          echo "## Athlete Profile Scrape Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "data/profiles/athlete_profiles_latest.csv" ]; then
+            PROFILE_COUNT=$(wc -l < "data/profiles/athlete_profiles_latest.csv")
+            echo "- **Profiles scraped**: $((PROFILE_COUNT - 1))" >> $GITHUB_STEP_SUMMARY
+            echo "- **Timestamp**: $(date)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Sample Data" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            head -6 data/profiles/athlete_profiles_latest.csv >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No profiles scraped" >> $GITHUB_STEP_SUMMARY
+          fi
