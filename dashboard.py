@@ -10,12 +10,24 @@ import plotly.graph_objects as go
 from pathlib import Path
 from datetime import datetime
 import json
+import base64
 
 from performance_analyzer import TaekwondoPerformanceAnalyzer
 from models import WeightCategory
 from advanced_kpis import AdvancedKPIAnalyzer
 from ranking_tracker import RankingHistoryTracker
 from config import ASIAN_RIVALS, ASIAN_COUNTRIES, ASIAN_GAMES_2026, LA_2028_OLYMPICS, DUAL_TRACK_MILESTONES
+
+# Theme assets path
+THEME_PATH = Path(r"C:\Users\l.gallagher\OneDrive - Team Saudi\Documents\Performance Analysis\Theme")
+
+def get_image_base64(image_path):
+    """Convert image to base64 for embedding in HTML"""
+    try:
+        with open(image_path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode()
+    except Exception:
+        return None
 
 # Saudi Olympic Committee Theme Colors
 THEME_COLORS = {
@@ -73,6 +85,33 @@ st.markdown("""
     .stButton>button:hover {
         background-color: #096c64;
     }
+    /* Sidebar teal gradient styling */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #007167 0%, #005a51 100%);
+    }
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
+        color: white !important;
+    }
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] span {
+        color: white !important;
+    }
+    [data-testid="stSidebar"] .stRadio > label {
+        color: white !important;
+    }
+    [data-testid="stSidebar"] [data-baseweb="radio"] {
+        background-color: rgba(255,255,255,0.1);
+        border-radius: 8px;
+        padding: 8px;
+        margin: 4px 0;
+    }
+    [data-testid="stSidebar"] [data-baseweb="radio"]:hover {
+        background-color: rgba(255,255,255,0.2);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -86,11 +125,33 @@ def load_analyzer():
 def main():
     """Main dashboard application"""
 
-    # Header
-    st.markdown('<div class="main-header">🥋 Saudi Arabia Taekwondo Performance Dashboard</div>',
-                unsafe_allow_html=True)
+    # Load theme images
+    banner_b64 = get_image_base64(THEME_PATH / "team_saudi_banner.jpg")
+    logo_b64 = get_image_base64(THEME_PATH / "team_saudi_logo.jpg")
 
-    st.markdown("---")
+    # Header with Banner
+    if banner_b64:
+        st.markdown(f'''
+        <div style="position: relative; border-radius: 12px; overflow: hidden; margin-bottom: 1.5rem;
+             box-shadow: 0 8px 25px rgba(0, 113, 103, 0.25);">
+            <img src="data:image/jpeg;base64,{banner_b64}" style="width: 100%; height: 180px; object-fit: cover; filter: brightness(0.7);">
+            <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center;">
+                <div style="text-align: center;">
+                    <h1 style="color: white; font-size: 2.2rem; margin: 0; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">
+                        Saudi Arabia Taekwondo Analytics
+                    </h1>
+                    <p style="color: #a08e66; font-size: 1.1rem; margin: 0.5rem 0 0 0; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">
+                        Performance Intelligence for Asian Games 2026 & LA 2028
+                    </p>
+                </div>
+            </div>
+            <div style="position: absolute; bottom: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #007167 0%, #a08e66 50%, #005a51 100%);"></div>
+        </div>
+        ''', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="main-header">🥋 Saudi Arabia Taekwondo Performance Dashboard</div>',
+                    unsafe_allow_html=True)
+        st.markdown("---")
 
     # Initialize analyzer
     try:
@@ -100,7 +161,14 @@ def main():
         st.info("Please run the scraper first to collect data.")
         return
 
-    # Sidebar
+    # Sidebar with Logo
+    if logo_b64:
+        st.sidebar.markdown(f'''
+        <div style="text-align: center; padding: 1rem 0; margin-bottom: 1rem;">
+            <img src="data:image/jpeg;base64,{logo_b64}" style="width: 180px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+        </div>
+        ''', unsafe_allow_html=True)
+
     st.sidebar.title("Navigation")
 
     # Group navigation by category

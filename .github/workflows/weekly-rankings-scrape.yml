@@ -1,6 +1,6 @@
 # Weekly World Taekwondo Rankings Scraper
 # =========================================
-# Scrapes rankings data and uploads to Azure Blob Storage
+# Scrapes ALL 16 weight categories and uploads to Azure Blob Storage
 
 name: Weekly Rankings Scraper
 
@@ -17,9 +17,9 @@ env:
 
 jobs:
   scrape-rankings:
-    name: Scrape World Taekwondo Rankings
+    name: Scrape All Weight Categories
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
@@ -45,7 +45,7 @@ jobs:
           mkdir -p data/rankings
           mkdir -p data/athletes
 
-      - name: Run Rankings Scraper
+      - name: Run Rankings Scraper - All Categories
         id: scrape
         continue-on-error: true
         run: |
@@ -58,12 +58,36 @@ jobs:
           from selenium.webdriver.common.by import By
           from selenium.webdriver.chrome.options import Options
           from selenium.webdriver.chrome.service import Service
+          from selenium.webdriver.support.ui import WebDriverWait
+          from selenium.webdriver.support import expected_conditions as EC
           from webdriver_manager.chrome import ChromeDriverManager
           from io import StringIO
 
           print("="*60)
-          print("WORLD TAEKWONDO RANKINGS SCRAPER")
+          print("WORLD TAEKWONDO RANKINGS SCRAPER - ALL CATEGORIES")
           print("="*60)
+
+          # All 16 Olympic weight categories
+          WEIGHT_CATEGORIES = {
+              # Men's categories
+              'M-54kg': ('M', 'M_54'),
+              'M-58kg': ('M', 'M_58'),
+              'M-63kg': ('M', 'M_63'),
+              'M-68kg': ('M', 'M_68'),
+              'M-74kg': ('M', 'M_74'),
+              'M-80kg': ('M', 'M_80'),
+              'M-87kg': ('M', 'M_87'),
+              'M+87kg': ('M', 'M_87P'),
+              # Women's categories
+              'F-46kg': ('F', 'F_46'),
+              'F-49kg': ('F', 'F_49'),
+              'F-53kg': ('F', 'F_53'),
+              'F-57kg': ('F', 'F_57'),
+              'F-62kg': ('F', 'F_62'),
+              'F-67kg': ('F', 'F_67'),
+              'F-73kg': ('F', 'F_73'),
+              'F+73kg': ('F', 'F_73P'),
+          }
 
           # Setup Chrome
           chrome_options = Options()
@@ -77,111 +101,157 @@ jobs:
           try:
               service = Service(ChromeDriverManager().install())
               driver = webdriver.Chrome(service=service, options=chrome_options)
+              driver.set_page_load_timeout(30)
               print("[OK] Chrome initialized")
           except Exception as e:
               print(f"[ERROR] Chrome setup failed: {e}")
               exit(1)
 
+          all_athletes = []
+          categories_scraped = 0
+          timestamp = datetime.now().strftime('%Y%m%d')
+          output_dir = Path('data/rankings')
+          output_dir.mkdir(parents=True, exist_ok=True)
+
+          # SimplyCompete base URL for rankings
+          base_url = "https://worldtaekwondo.simplycompete.com/widget/rankings?country=&lang=EN&cat="
+
           try:
-              # Load World Taekwondo rankings page
-              url = "https://www.worldtaekwondo.org/athletes/Ranking/contents"
-              print(f"\n[LOADING] {url}")
-              driver.get(url)
-              time.sleep(5)
+              for category_name, (gender, category_code) in WEIGHT_CATEGORIES.items():
+                  print(f"\n{'='*50}")
+                  print(f"[SCRAPING] {category_name} ({gender})")
+                  print(f"{'='*50}")
 
-              # Find iframe
-              iframes = driver.find_elements(By.TAG_NAME, 'iframe')
-              print(f"[OK] Found {len(iframes)} iframes")
+                  try:
+                      # Direct URL to SimplyCompete rankings for this category
+                      url = f"{base_url}{category_code}"
+                      print(f"[URL] {url}")
 
-              for iframe in iframes:
-                  src = iframe.get_attribute('src') or ""
-                  if 'simplycompete' in src.lower():
-                      driver.switch_to.frame(iframe)
-                      print(f"[OK] Switched to SimplyCompete iframe")
-                      break
+                      driver.get(url)
+                      time.sleep(3)
 
-              # Wait for content
-              time.sleep(5)
+                      # Wait for table to load
+                      try:
+                          WebDriverWait(driver, 15).until(
+                              EC.presence_of_element_located((By.TAG_NAME, 'table'))
+                          )
+                      except:
+                          print(f"[WARN] Timeout waiting for table in {category_name}")
+                          continue
 
-              # Find tables
-              tables = driver.find_elements(By.TAG_NAME, 'table')
-              print(f"[OK] Found {len(tables)} tables")
+                      # Find tables
+                      tables = driver.find_elements(By.TAG_NAME, 'table')
 
-              if not tables:
-                  print("[ERROR] No tables found")
-                  driver.quit()
-                  exit(1)
+                      if not tables:
+                          print(f"[WARN] No tables found for {category_name}")
+                          continue
 
-              # Extract best table
-              best_table = None
-              max_rows = 0
-              for table in tables:
-                  rows = table.find_elements(By.TAG_NAME, 'tr')
-                  if len(rows) > max_rows:
-                      max_rows = len(rows)
-                      best_table = table
+                      # Find the best table (most rows)
+                      best_table = None
+                      max_rows = 0
+                      for table in tables:
+                          rows = table.find_elements(By.TAG_NAME, 'tr')
+                          if len(rows) > max_rows:
+                              max_rows = len(rows)
+                              best_table = table
 
-              if not best_table or max_rows < 2:
-                  print("[ERROR] No valid table found")
-                  driver.quit()
-                  exit(1)
+                      if not best_table or max_rows < 2:
+                          print(f"[WARN] No valid table found for {category_name}")
+                          continue
 
-              # Parse with pandas
-              html = best_table.get_attribute('outerHTML')
-              dfs = pd.read_html(StringIO(html))
+                      # Parse with pandas
+                      html = best_table.get_attribute('outerHTML')
+                      dfs = pd.read_html(StringIO(html))
 
-              if dfs and len(dfs[0]) > 0:
-                  df = dfs[0]
-                  print(f"[OK] Extracted {len(df)} rows")
+                      if dfs and len(dfs[0]) > 0:
+                          df = dfs[0]
 
-                  # Standardize columns
-                  df.columns = ['rank', 'rank_change', 'athlete_name', 'country', 'points'][:len(df.columns)]
+                          # Standardize columns
+                          if len(df.columns) >= 5:
+                              df.columns = ['rank', 'rank_change', 'athlete_name', 'country', 'points'] + list(df.columns[5:])
 
-                  # Add metadata
-                  df['weight_category'] = 'M-58kg'  # Default category shown
-                  df['gender'] = 'M'
-                  df['scraped_at'] = datetime.now().isoformat()
+                          # Keep only needed columns
+                          df = df[['rank', 'rank_change', 'athlete_name', 'country', 'points']].copy()
 
-                  # Save
-                  output_dir = Path('data/rankings')
-                  output_dir.mkdir(parents=True, exist_ok=True)
+                          # Add metadata
+                          df['gender'] = gender
+                          df['weight_category'] = category_name
+                          df['scraped_at'] = datetime.now().isoformat()
 
-                  timestamp = datetime.now().strftime('%Y%m%d')
-                  df.to_csv(output_dir / f'world_rankings_{timestamp}.csv', index=False)
-                  df.to_csv(output_dir / 'world_rankings_latest.csv', index=False)
+                          # Save individual category file
+                          cat_file = output_dir / f'{category_name.replace("+", "P")}_rankings_{timestamp}.csv'
+                          df.to_csv(cat_file, index=False)
 
-                  print(f"\n[SAVED] {len(df)} athletes to data/rankings/")
-                  print(f"[OK] Scraping complete!")
+                          all_athletes.append(df)
+                          categories_scraped += 1
 
-                  # Check for Saudi athletes
-                  saudi = df[df['country'].str.contains('KSA|Saudi', case=False, na=False)]
-                  if len(saudi) > 0:
-                      print(f"\n[KSA] Found {len(saudi)} Saudi athletes!")
-                      for _, row in saudi.iterrows():
-                          print(f"  - {row['athlete_name']}: #{row['rank']}")
-              else:
-                  print("[ERROR] Could not parse table")
-                  exit(1)
+                          print(f"[OK] {category_name}: {len(df)} athletes")
+
+                          # Check for Saudi athletes
+                          saudi = df[df['country'].str.contains('KSA|Saudi', case=False, na=False)]
+                          if len(saudi) > 0:
+                              print(f"[KSA] Found {len(saudi)} Saudi athletes in {category_name}!")
+                              for _, row in saudi.iterrows():
+                                  print(f"  - {row['athlete_name']}: #{row['rank']}")
+                      else:
+                          print(f"[WARN] Empty table for {category_name}")
+
+                  except Exception as e:
+                      print(f"[ERROR] Failed to scrape {category_name}: {e}")
+                      continue
+
+                  # Brief pause between categories
+                  time.sleep(2)
 
           except Exception as e:
               print(f"[ERROR] Scraping failed: {e}")
               import traceback
               traceback.print_exc()
-              exit(1)
 
           finally:
               driver.quit()
-              print("[OK] Browser closed")
+              print("\n[OK] Browser closed")
+
+          # Combine all data
+          if all_athletes:
+              combined_df = pd.concat(all_athletes, ignore_index=True)
+
+              # Save combined file
+              combined_df.to_csv(output_dir / f'world_rankings_all_{timestamp}.csv', index=False)
+              combined_df.to_csv(output_dir / 'world_rankings_latest.csv', index=False)
+
+              # Save Saudi athletes separately
+              saudi_df = combined_df[combined_df['country'].str.contains('KSA|Saudi', case=False, na=False)]
+              if len(saudi_df) > 0:
+                  athletes_dir = Path('data/athletes')
+                  athletes_dir.mkdir(parents=True, exist_ok=True)
+                  saudi_df.to_csv(athletes_dir / 'saudi_athletes.csv', index=False)
+                  print(f"\n[KSA] Saved {len(saudi_df)} Saudi athletes to data/athletes/saudi_athletes.csv")
+
+              print(f"\n{'='*60}")
+              print(f"SCRAPING COMPLETE!")
+              print(f"{'='*60}")
+              print(f"Categories scraped: {categories_scraped}/16")
+              print(f"Total athletes: {len(combined_df)}")
+              print(f"Unique countries: {combined_df['country'].nunique()}")
+              print(f"Saudi athletes: {len(saudi_df)}")
+              print(f"Files saved to: data/rankings/")
+          else:
+              print("\n[ERROR] No data collected!")
+              exit(1)
           EOF
 
           # Check results
           if [ -f "data/rankings/world_rankings_latest.csv" ]; then
             ATHLETE_COUNT=$(wc -l < "data/rankings/world_rankings_latest.csv")
+            CATEGORY_COUNT=$(ls data/rankings/*_rankings_*.csv 2>/dev/null | wc -l)
             echo "athletes_collected=$((ATHLETE_COUNT - 1))" >> $GITHUB_OUTPUT
+            echo "categories_scraped=$CATEGORY_COUNT" >> $GITHUB_OUTPUT
             echo "scrape_status=success" >> $GITHUB_OUTPUT
-            echo "Collected $((ATHLETE_COUNT - 1)) athletes"
+            echo "Collected $((ATHLETE_COUNT - 1)) athletes from $CATEGORY_COUNT categories"
           else
             echo "athletes_collected=0" >> $GITHUB_OUTPUT
+            echo "categories_scraped=0" >> $GITHUB_OUTPUT
             echo "scrape_status=failed" >> $GITHUB_OUTPUT
             echo "No data collected"
           fi
@@ -238,16 +308,38 @@ jobs:
 
       - name: Job Summary
         run: |
-          echo "## Rankings Scrape Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## World Taekwondo Rankings Scrape Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status**: ${{ steps.scrape.outputs.scrape_status || 'unknown' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Athletes**: ${{ steps.scrape.outputs.athletes_collected || '0' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Time**: $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ steps.scrape.outputs.scrape_status || 'unknown' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Categories | ${{ steps.scrape.outputs.categories_scraped || '0' }}/16 |" >> $GITHUB_STEP_SUMMARY
+          echo "| Total Athletes | ${{ steps.scrape.outputs.athletes_collected || '0' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Timestamp | $(date) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ -f "data/rankings/world_rankings_latest.csv" ]; then
+            # Count unique countries
+            COUNTRIES=$(tail -n +2 data/rankings/world_rankings_latest.csv | cut -d',' -f4 | sort -u | wc -l)
+            echo "- **Unique Countries**: $COUNTRIES" >> $GITHUB_STEP_SUMMARY
+
+            # Check for Saudi athletes
+            SAUDI_COUNT=$(grep -i "KSA\|Saudi" data/rankings/world_rankings_latest.csv | wc -l)
+            if [ "$SAUDI_COUNT" -gt 0 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### Saudi Athletes Found" >> $GITHUB_STEP_SUMMARY
+              grep -i "KSA\|Saudi" data/rankings/world_rankings_latest.csv >> $GITHUB_STEP_SUMMARY
+            fi
+
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Sample Data" >> $GITHUB_STEP_SUMMARY
+            echo "### Sample Data (First 10 rows)" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
-            head -6 data/rankings/world_rankings_latest.csv >> $GITHUB_STEP_SUMMARY
+            head -11 data/rankings/world_rankings_latest.csv >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Files Generated" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            ls -la data/rankings/*.csv >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
