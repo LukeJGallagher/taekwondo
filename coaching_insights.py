@@ -710,11 +710,11 @@ class CoachingInsights:
 
 def render_squad_card(athlete: AthleteStatus) -> str:
     """Render athlete status as HTML card for Streamlit - Team Saudi Theme."""
-    # Team Saudi Brand Colors
-    TEAL_PRIMARY = '#007167'
+    # Team Saudi Brand Colors - Logo Green
+    TEAL_PRIMARY = '#1E5631'      # Forest green (logo match)
     GOLD_ACCENT = '#a08e66'
-    TEAL_DARK = '#005a51'
-    TEAL_LIGHT = '#009688'
+    TEAL_DARK = '#163d24'         # Darker green
+    TEAL_LIGHT = '#2D5A3D'        # Lighter green
     GRAY_BLUE = '#78909C'
 
     # Status colors - Team Saudi palette
@@ -794,11 +794,11 @@ def render_squad_card(athlete: AthleteStatus) -> str:
 
 def render_competition_card(comp: CompetitionOpportunity) -> str:
     """Render competition opportunity as HTML card - Team Saudi Theme."""
-    # Team Saudi Brand Colors
-    TEAL_PRIMARY = '#007167'
+    # Team Saudi Brand Colors - Logo Green
+    TEAL_PRIMARY = '#1E5631'      # Forest green (logo match)
     GOLD_ACCENT = '#a08e66'
-    TEAL_DARK = '#005a51'
-    TEAL_LIGHT = '#009688'
+    TEAL_DARK = '#163d24'         # Darker green
+    TEAL_LIGHT = '#2D5A3D'        # Lighter green
 
     # Strategic value colors - Team Saudi palette
     strategic_colors = {

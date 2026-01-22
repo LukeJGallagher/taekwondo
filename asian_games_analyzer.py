@@ -10,7 +10,7 @@ from datetime import datetime
 import json
 
 # Team Saudi Brand Colors
-TEAL_PRIMARY = '#007167'
+TEAL_PRIMARY = '#1E5631'
 GOLD_ACCENT = '#a08e66'
 
 

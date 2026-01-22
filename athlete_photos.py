@@ -68,9 +68,9 @@ class AthletePhotoManager:
             return f'''
             <img src="{url}"
                  style="width: {size}px; height: {size}px; object-fit: cover; border-radius: {border_radius};
-                        border: 3px solid #007167; box-shadow: 0 4px 8px rgba(0,0,0,0.2);"
+                        border: 3px solid #1E5631; box-shadow: 0 4px 8px rgba(0,0,0,0.2);"
                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-            <div style="width: {size}px; height: {size}px; background: linear-gradient(135deg, #007167 0%, #005a51 100%);
+            <div style="width: {size}px; height: {size}px; background: linear-gradient(135deg, #1E5631 0%, #163d24 100%);
                  border-radius: {border_radius}; display: none; align-items: center; justify-content: center;
                  color: white; font-size: {size//3}px; font-weight: bold; border: 3px solid #a08e66;">
                 {self._get_initials(athlete_name)}
@@ -80,7 +80,7 @@ class AthletePhotoManager:
         # No URL - show placeholder with initials
         initials = self._get_initials(athlete_name)
         return f'''
-        <div style="width: {size}px; height: {size}px; background: linear-gradient(135deg, #007167 0%, #005a51 100%);
+        <div style="width: {size}px; height: {size}px; background: linear-gradient(135deg, #1E5631 0%, #163d24 100%);
              border-radius: {border_radius}; display: flex; align-items: center; justify-content: center;
              color: white; font-size: {size//3}px; font-weight: bold; border: 3px solid #a08e66;
              box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
@@ -143,14 +143,14 @@ def create_athlete_card_html(athlete_name: str,
 
     return f'''
     <div style="background: white; border-radius: 12px; padding: 1rem;
-         box-shadow: 0 4px 12px rgba(0,0,0,0.1); border-left: 4px solid #007167;
+         box-shadow: 0 4px 12px rgba(0,0,0,0.1); border-left: 4px solid #1E5631;
          display: flex; align-items: center; gap: 1rem; margin-bottom: 0.75rem;">
         {photo_html}
         <div style="flex: 1;">
             <h4 style="margin: 0; color: #333; font-size: 1rem;">{athlete_name}</h4>
             <p style="margin: 0.25rem 0 0 0; color: #666; font-size: 0.85rem;">{weight_category}{country_display}</p>
             <div style="display: flex; gap: 1rem; margin-top: 0.5rem;">
-                <span style="background: #007167; color: white; padding: 0.2rem 0.5rem;
+                <span style="background: #1E5631; color: white; padding: 0.2rem 0.5rem;
                        border-radius: 4px; font-size: 0.75rem; font-weight: bold;">{rank_display}</span>
                 <span style="background: #a08e66; color: white; padding: 0.2rem 0.5rem;
                        border-radius: 4px; font-size: 0.75rem;">{points_display}</span>
@@ -177,7 +177,7 @@ def create_athlete_row_html(athlete_name: str,
     <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem;
          border-bottom: 1px solid #eee;">
         {photo_html}
-        <span style="width: 40px; font-weight: bold; color: #007167;">#{rank}</span>
+        <span style="width: 40px; font-weight: bold; color: #1E5631;">#{rank}</span>
         <span style="flex: 1; font-weight: 500;">{athlete_name}</span>
         <span style="width: 80px; color: #666;">{weight_category}</span>
         <span style="width: 80px; color: #666;">{country}</span>

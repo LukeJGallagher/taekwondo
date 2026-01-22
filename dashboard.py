@@ -29,16 +29,16 @@ def get_image_base64(image_path):
     except Exception:
         return None
 
-# Saudi Olympic Committee Theme Colors
+# Team Saudi Theme Colors - Matching Logo Green
 THEME_COLORS = {
-    'primary_teal': '#007167',
-    'secondary_teal': '#096c64',
-    'gold': '#a08e66',
+    'primary_green': '#1E5631',      # Dark forest green (logo match)
+    'secondary_green': '#2D5A3D',    # Lighter forest green
+    'gold': '#a08e66',               # Gold accent
     'secondary_gold': '#9d8e65',
     'medal_gold': '#FFD700',
     'medal_silver': '#C0C0C0',
     'medal_bronze': '#CD7F32',
-    'chart_palette': ['#007167', '#a08e66', '#096c64', '#9d8e65', '#005850', '#8a7a58']
+    'chart_palette': ['#1E5631', '#a08e66', '#2D5A3D', '#9d8e65', '#163d24', '#8a7a58']
 }
 
 # Page configuration
@@ -55,39 +55,39 @@ st.markdown("""
     .main-header {
         font-size: 3rem;
         font-weight: bold;
-        color: #007167;
+        color: #1E5631;
         text-align: center;
         padding: 1rem 0;
-        background: linear-gradient(90deg, #007167 0%, #096c64 100%);
+        background: linear-gradient(90deg, #1E5631 0%, #2D5A3D 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
     }
     .metric-card {
-        background: linear-gradient(135deg, #007167 0%, #096c64 100%);
+        background: linear-gradient(135deg, #1E5631 0%, #2D5A3D 100%);
         padding: 1.5rem;
         border-radius: 10px;
         color: white;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
-    .ksa-teal { color: #007167; }
+    .ksa-teal { color: #1E5631; }
     .ksa-gold { color: #a08e66; }
     .gold { color: #FFD700; }
     .silver { color: #C0C0C0; }
     .bronze { color: #CD7F32; }
     .stButton>button {
-        background-color: #007167;
+        background-color: #1E5631;
         color: white;
         border-radius: 5px;
         border: none;
         padding: 0.5rem 1rem;
     }
     .stButton>button:hover {
-        background-color: #096c64;
+        background-color: #2D5A3D;
     }
     /* Sidebar teal gradient styling */
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #007167 0%, #005a51 100%);
+        background: linear-gradient(180deg, #1E5631 0%, #163d24 100%);
     }
     [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
         color: white !important;
@@ -145,7 +145,7 @@ def main():
                     </p>
                 </div>
             </div>
-            <div style="position: absolute; bottom: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #007167 0%, #a08e66 50%, #005a51 100%);"></div>
+            <div style="position: absolute; bottom: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #1E5631 0%, #a08e66 50%, #163d24 100%);"></div>
         </div>
         ''', unsafe_allow_html=True)
     else:
@@ -1050,7 +1050,7 @@ def show_competition_planning(analyzer):
 def show_asian_games_command_center(analyzer):
     """Display Asian Games 2026 Command Center - Continental focus for Nagoya"""
     st.markdown("""
-    <div style="background: linear-gradient(135deg, #007167 0%, #005a51 100%); padding: 1.5rem; border-radius: 10px; margin-bottom: 1.5rem;">
+    <div style="background: linear-gradient(135deg, #1E5631 0%, #163d24 100%); padding: 1.5rem; border-radius: 10px; margin-bottom: 1.5rem;">
         <h1 style="color: white; margin: 0;">🏆 Asian Games 2026 Command Center</h1>
         <p style="color: rgba(255,255,255,0.9); margin: 0.5rem 0 0 0; font-size: 1.1rem;">
             Nagoya, Japan | September 19 - October 4, 2026
@@ -1331,7 +1331,7 @@ def show_asian_games_command_center(analyzer):
 def show_points_simulator(analyzer):
     """Display Points Simulator - What-if scenario planning"""
     st.markdown("""
-    <div style="background: linear-gradient(135deg, #007167 0%, #005a51 100%); padding: 1.5rem; border-radius: 10px; margin-bottom: 1.5rem;">
+    <div style="background: linear-gradient(135deg, #1E5631 0%, #163d24 100%); padding: 1.5rem; border-radius: 10px; margin-bottom: 1.5rem;">
         <h1 style="color: white; margin: 0;">📊 Points Simulator</h1>
         <p style="color: rgba(255,255,255,0.9); margin: 0.5rem 0 0 0;">
             Model "what if" scenarios for competition attendance decisions
@@ -1463,7 +1463,7 @@ def show_points_simulator(analyzer):
                     """, unsafe_allow_html=True)
 
                 with col2:
-                    oly_color = "#007167" if result.olympic_probability >= 0.5 else "#a08e66" if result.olympic_probability >= 0.25 else "#6c757d"
+                    oly_color = "#1E5631" if result.olympic_probability >= 0.5 else "#a08e66" if result.olympic_probability >= 0.25 else "#6c757d"
                     st.markdown(f"""
                     <div style="background: {oly_color}; padding: 1rem; border-radius: 8px; text-align: center;">
                         <p style="color: white; margin: 0; font-size: 0.9rem;">LA 2028 Probability</p>
@@ -1510,7 +1510,7 @@ def show_points_simulator(analyzer):
 def show_tactical_scouting(analyzer):
     """Display Tactical Scouting Hub"""
     st.markdown("""
-    <div style="background: linear-gradient(135deg, #007167 0%, #005a51 100%); padding: 1.5rem; border-radius: 10px; margin-bottom: 1.5rem;">
+    <div style="background: linear-gradient(135deg, #1E5631 0%, #163d24 100%); padding: 1.5rem; border-radius: 10px; margin-bottom: 1.5rem;">
         <h1 style="color: white; margin: 0;">🎯 Tactical Scouting Hub</h1>
         <p style="color: rgba(255,255,255,0.9); margin: 0.5rem 0 0 0;">
             Deep opponent intelligence for match preparation
@@ -1618,7 +1618,7 @@ def show_tactical_scouting(analyzer):
                         border_color = "#a08e66"
                     else:
                         bg_color = "rgba(0, 113, 103, 0.08)"  # Normal - teal tint
-                        border_color = "#007167"
+                        border_color = "#1E5631"
 
                     st.markdown(f"""
                     <div style="background: {bg_color}; border-left: 4px solid {border_color}; padding: 10px 15px; margin: 5px 0; border-radius: 5px;">
@@ -1713,7 +1713,7 @@ def show_tactical_scouting(analyzer):
 def show_coaching_dashboard(analyzer):
     """Display HP Director Coaching Dashboard - Executive overview for leadership."""
     st.markdown("""
-    <div style="background: linear-gradient(135deg, #007167 0%, #005a51 100%); padding: 1.5rem; border-radius: 10px; margin-bottom: 1.5rem;">
+    <div style="background: linear-gradient(135deg, #1E5631 0%, #163d24 100%); padding: 1.5rem; border-radius: 10px; margin-bottom: 1.5rem;">
         <h1 style="color: white; margin: 0;">HP Director Dashboard</h1>
         <p style="color: rgba(255,255,255,0.9); margin: 0.5rem 0 0 0;">
             Executive overview for High Performance leadership decisions
@@ -1727,9 +1727,9 @@ def show_coaching_dashboard(analyzer):
         insights = CoachingInsights()
 
         # Team Saudi Brand Colors
-        TEAL_PRIMARY = '#007167'
+        TEAL_PRIMARY = '#1E5631'
         GOLD_ACCENT = '#a08e66'
-        TEAL_DARK = '#005a51'
+        TEAL_DARK = '#163d24'
         TEAL_LIGHT = '#009688'
 
         # Key metrics row
@@ -1860,7 +1860,7 @@ def show_coaching_dashboard(analyzer):
 def show_squad_management(analyzer):
     """Display Squad Management view for coaches."""
     st.markdown("""
-    <div style="background: linear-gradient(135deg, #007167 0%, #005a51 100%); padding: 1.5rem; border-radius: 10px; margin-bottom: 1.5rem;">
+    <div style="background: linear-gradient(135deg, #1E5631 0%, #163d24 100%); padding: 1.5rem; border-radius: 10px; margin-bottom: 1.5rem;">
         <h1 style="color: white; margin: 0;">Squad Management</h1>
         <p style="color: rgba(255,255,255,0.9); margin: 0.5rem 0 0 0;">
             Individual athlete tracking, readiness, and development planning

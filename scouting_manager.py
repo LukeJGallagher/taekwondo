@@ -1072,11 +1072,11 @@ class ScoutingManager:
 
 def render_opponent_card(profile: OpponentProfile) -> str:
     """Render opponent profile as HTML card for Streamlit - Team Saudi Theme."""
-    # Team Saudi Brand Colors
-    TEAL_PRIMARY = '#007167'
+    # Team Saudi Brand Colors - Logo Green
+    TEAL_PRIMARY = '#1E5631'      # Forest green (logo match)
     GOLD_ACCENT = '#a08e66'
-    TEAL_DARK = '#005a51'
-    TEAL_LIGHT = '#009688'
+    TEAL_DARK = '#163d24'         # Darker green
+    TEAL_LIGHT = '#2D5A3D'        # Lighter green
     GRAY_BLUE = '#78909C'
 
     # Threat level colors - Team Saudi palette
